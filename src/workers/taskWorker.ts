@@ -1,5 +1,8 @@
+import { In } from 'typeorm';
 import { AppDataSource } from '../data-source';
 import { Task } from '../models/Task';
+import { Workflow } from '../models/Workflow';
+import { WorkflowStatus } from '../workflows/WorkflowFactory';
 import { TaskRunner, TaskStatus } from './taskRunner';
 
 export async function taskWorker() {
@@ -8,8 +11,8 @@ export async function taskWorker() {
 
     while (true) {
         const task = await taskRepository.findOne({
-            where: { status: TaskStatus.Queued },
-            relations: ['workflow'], // Ensure workflow is loaded
+            where: { status: TaskStatus.Ready },
+            relations: ['workflow', 'workflow.tasks'], // Ensure workflow is loaded
         });
 
         if (task) {

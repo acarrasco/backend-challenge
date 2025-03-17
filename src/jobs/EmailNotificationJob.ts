@@ -1,7 +1,7 @@
-import { Job } from './Job';
+import { DefaultJob } from './Job';
 import { Task } from '../models/Task';
 
-export class EmailNotificationJob implements Job {
+export class EmailNotificationJob extends DefaultJob {
     async run(task: Task): Promise<void> {
         console.log(`Sending email notification for task ${task.taskId}...`);
         // Perform notification work

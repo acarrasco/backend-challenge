@@ -1,10 +1,10 @@
-import { Job } from './Job';
+import { DefaultJob, Job } from './Job';
 import { Task } from '../models/Task';
 import booleanWithin from '@turf/boolean-within';
 import { Feature, Polygon } from 'geojson';
 import countryMapping from '../data/world_data.json';
 
-export class DataAnalysisJob implements Job {
+export class DataAnalysisJob extends DefaultJob {
     async run(task: Task): Promise<string> {
         console.log(`Running data analysis for task ${task.taskId}...`);
 

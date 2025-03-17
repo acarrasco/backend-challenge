@@ -3,7 +3,7 @@ import * as yaml from 'js-yaml';
 import { DataSource } from 'typeorm';
 import { Workflow } from '../models/Workflow';
 import { Task } from '../models/Task';
-import { TaskStatus } from '../workers/taskRunner';
+import { updateQueuedTasksStatus, TaskStatus } from '../workers/taskRunner';
 
 export enum WorkflowStatus {
     Initial = 'initial',
@@ -54,6 +54,9 @@ export class WorkflowFactory {
             task.workflow = savedWorkflow;
             return task;
         });
+
+        savedWorkflow.tasks = tasks;
+        updateQueuedTasksStatus(savedWorkflow);
 
         await taskRepository.save(tasks);
 

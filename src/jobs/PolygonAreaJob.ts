@@ -1,9 +1,9 @@
-import { Job } from './Job';
+import { DefaultJob } from './Job';
 import { Task } from '../models/Task';
 import { Feature, Polygon } from 'geojson';
 import * as turf from '@turf/turf';
 
-export class PolygonAreaJob implements Job {
+export class PolygonAreaJob extends DefaultJob {
     async run(task: Task): Promise<number> {
         console.log(`Calculating polygon area for task ${task.taskId}...`);
 

@@ -30,4 +30,12 @@ export class Task {
 
     @ManyToOne(() => Workflow, workflow => workflow.tasks)
     workflow!: Workflow;
+
+    isFinished(): boolean {
+        return (
+            this.status === TaskStatus.Completed ||
+            this.status === TaskStatus.Failed ||
+            this.status == TaskStatus.Aborted
+        );
+    }
 }

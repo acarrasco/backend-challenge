@@ -6,10 +6,71 @@ import { Workflow } from '../models/Workflow';
 import { Result } from '../models/Result';
 
 export enum TaskStatus {
+    /**
+     * The task is waiting for its dependencies to complete
+     */
     Queued = 'queued',
+    /**
+     * The task is ready to run, its dependencies have completed
+     */
+    Ready = 'ready',
+    /**
+     * The task is running
+     */
     InProgress = 'in_progress',
+    /**
+     * The task finished successfully
+     */
     Completed = 'completed',
+    /**
+     * The task exited with an error
+     */
     Failed = 'failed',
+    /**
+     * Some of the dependencies failed
+     */
+    Aborted = 'aborted',
+}
+
+/**
+ * Returns a list of tasks that have their statuses updated.
+ *
+ * It takes care of nested dependencies by invoking itself
+ * recursively until there are no further changes.
+ *
+ * @param remaining Tasks whose status have not changed (yet)
+ * @returns The tasks that have their status updated.
+ */
+function getChangedTasks(remaining: Task[]): Task[] {
+    const changed: Task[] = [];
+    const unchanged: Task[] = [];
+
+    for (const task of remaining) {
+        const nextStatus = getJobForTaskType(task.taskType).nextStatus(task);
+        if (nextStatus) {
+            task.status = nextStatus;
+            changed.push(task);
+        } else {
+            unchanged.push(task);
+        }
+    }
+
+    if (changed.length) {
+        changed.push(...getChangedTasks(unchanged));
+    }
+
+    return changed;
+}
+
+/**
+ * For every queued task in the workflow, checks if the status has changed and updates it.
+ *
+ * @param workflow The workflow its tasks statuses should be updated.
+ * @returns The tasks that have an updated status.
+ */
+export function updateQueuedTasksStatus(workflow: Workflow): Task[] {
+    const queuedTasks = workflow.tasks.filter(t => t.status === TaskStatus.Queued);
+    return getChangedTasks(queuedTasks);
 }
 
 export class TaskRunner {
@@ -45,8 +106,6 @@ export class TaskRunner {
             task.status = TaskStatus.Failed;
             task.progress = null;
             await this.taskRepository.save(task);
-
-            throw error;
         }
 
         const workflowRepository = this.taskRepository.manager.getRepository(Workflow);
@@ -67,6 +126,13 @@ export class TaskRunner {
                 currentWorkflow.status = WorkflowStatus.InProgress;
             }
 
+            // we need the reflexive reference so a task can find its peers
+            currentWorkflow.tasks.forEach(t => {
+                t.workflow = currentWorkflow;
+            });
+            const changedStatusTasks = updateQueuedTasksStatus(currentWorkflow);
+
+            await this.taskRepository.save(changedStatusTasks);
             await workflowRepository.save(currentWorkflow);
         }
     }
