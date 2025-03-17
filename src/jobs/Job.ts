@@ -1,10 +1,11 @@
+import { Result } from '../models/Result';
 import { Task } from '../models/Task';
 import { TaskStatus } from '../workers/taskRunner';
 
 export interface Job {
-    run(task: Task): Promise<any>;
+    run(task: Task, ...inputs: Result[]): Promise<any>;
     nextStatus(task: Task): TaskStatus | undefined;
-    getJobDependencies(task: Task): Task[];
+    getDependencies(task: Task): Task[];
 }
 
 export abstract class DefaultJob implements Job {
@@ -20,7 +21,7 @@ export abstract class DefaultJob implements Job {
      * but nextStatus(C) = undefined (not changed)
      *
      * To work around this we can traverse the dependency graph recursively
-     * here, or re-run the calculations until the status are stable.
+     * here, or re-run the calculations until the statuses are stable.
      *
      * @param task The task to calculate the next status
      * @returns the next status for the task or undefined if it did not change
@@ -31,26 +32,29 @@ export abstract class DefaultJob implements Job {
             return undefined;
         }
 
-        for (const dependency of this.getJobDependencies(task)) {
-            if (dependency.status === TaskStatus.Aborted) {
-                // if any of our dependencies was aborted, we are aborted
-                return TaskStatus.Aborted;
-            }
-            if (dependency.status !== TaskStatus.Completed) {
-                // if not all the dependencies are completed, we keep our status
-                return undefined;
-            }
+        const dependencies = this.getDependencies(task);
+
+        // XXX there is a more elegant way to do this if TaskStatus values were
+        // objects with a virtual method we could use in a `reduce` operation...
+
+        if (dependencies.some(d => d.isError())) {
+            return TaskStatus.Aborted;
         }
-        // if all the dependencies were completed, we are ready
-        return TaskStatus.Ready;
+        if (dependencies.every(d => d.status === TaskStatus.Completed)) {
+            return TaskStatus.Ready;
+        }
+        return undefined;
     }
 
     /**
-     * Default implementation, for tasks without dependencies.
+     * Default implementation, for tasks with dependencies explicitly defined.
+     *
      * @param task The task to get dependencies for.
      * @returns an empty list of tasks
      */
-    getJobDependencies(task: Task): Task[] {
-        return [];
+    getDependencies(task: Task): Task[] {
+        const { workflow } = task;
+        const dependencies = new Set(task.dependsOn);
+        return workflow.tasks.filter(t => dependencies.has(t.stepNumber));
     }
 }

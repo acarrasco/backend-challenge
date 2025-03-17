@@ -1,4 +1,4 @@
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Task } from '../models/Task';
 import { getJobForTaskType } from '../jobs/JobFactory';
 import { WorkflowStatus } from '../workflows/WorkflowFactory';
@@ -48,6 +48,7 @@ function getChangedTasks(remaining: Task[]): Task[] {
     for (const task of remaining) {
         const nextStatus = getJobForTaskType(task.taskType).nextStatus(task);
         if (nextStatus) {
+            console.log(`Task ${task.taskId} of type ${task.taskType} is ${nextStatus}`);
             task.status = nextStatus;
             changed.push(task);
         } else {
@@ -69,6 +70,7 @@ function getChangedTasks(remaining: Task[]): Task[] {
  * @returns The tasks that have an updated status.
  */
 export function updateQueuedTasksStatus(workflow: Workflow): Task[] {
+    workflow.linkTasks();
     const queuedTasks = workflow.tasks.filter(t => t.status === TaskStatus.Queued);
     return getChangedTasks(queuedTasks);
 }
@@ -90,7 +92,9 @@ export class TaskRunner {
         try {
             console.log(`Starting job ${task.taskType} for task ${task.taskId}...`);
             const resultRepository = this.taskRepository.manager.getRepository(Result);
-            const taskResult = await job.run(task);
+            const dependencies = job.getDependencies(task);
+            const inputs = await resultRepository.findBy({ resultId: In(dependencies.map(t => t.resultId)) });
+            const taskResult = await job.run(task, ...inputs);
             console.log(`Job ${task.taskType} for task ${task.taskId} completed successfully.`);
             const result = new Result();
             result.taskId = task.taskId!;
@@ -126,10 +130,6 @@ export class TaskRunner {
                 currentWorkflow.status = WorkflowStatus.InProgress;
             }
 
-            // we need the reflexive reference so a task can find its peers
-            currentWorkflow.tasks.forEach(t => {
-                t.workflow = currentWorkflow;
-            });
             const changedStatusTasks = updateQueuedTasksStatus(currentWorkflow);
 
             await this.taskRepository.save(changedStatusTasks);

@@ -1,0 +1,11 @@
+name: 'explicit_dependencies'
+steps:
+    - taskType: 'random'
+      stepNumber: 1
+    - taskType: 'random'
+      stepNumber: 2
+    - taskType: 'sum'
+      stepNumber: 3
+      dependsOn: [1, 2]
+    - taskType: 'report'
+      stepNumber: 4

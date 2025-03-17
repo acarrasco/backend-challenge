@@ -1,8 +1,5 @@
-import { In } from 'typeorm';
 import { AppDataSource } from '../data-source';
 import { Task } from '../models/Task';
-import { Workflow } from '../models/Workflow';
-import { WorkflowStatus } from '../workflows/WorkflowFactory';
 import { TaskRunner, TaskStatus } from './taskRunner';
 
 export async function taskWorker() {
@@ -17,6 +14,7 @@ export async function taskWorker() {
 
         if (task) {
             try {
+                task.workflow.linkTasks();
                 await taskRunner.run(task);
             } catch (error) {
                 console.error('Task execution failed. Task status has already been updated by TaskRunner.');

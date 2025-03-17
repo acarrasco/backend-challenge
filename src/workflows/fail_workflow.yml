@@ -1,0 +1,14 @@
+name: 'fail_workflow'
+steps:
+    - taskType: 'fail'
+      stepNumber: 1
+    - taskType: 'random'
+      stepNumber: 2
+    - taskType: 'sum'
+      stepNumber: 3
+      dependsOn: [1, 2]
+    - taskType: 'sum'
+      stepNumber: 4
+      dependsOn: [2, 3]
+    - taskType: 'report'
+      stepNumber: 5

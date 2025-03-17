@@ -12,30 +12,33 @@ export class ReportGenerationJob extends DefaultJob {
     async run(task: Task): Promise<object> {
         console.log(`Generating report for task ${task.taskId}...`);
 
-        const previousTasks = this.getJobDependencies(task);
+        const previousTasks = this.getDependencies(task);
         const resultIds = previousTasks.map(t => t.resultId);
         const results = await this.resultRepository.findBy({ resultId: In(resultIds) });
         const outputs = Object.fromEntries(results.map(r => [r.resultId, r.data]));
 
-        const tasksStatusSummary = Object.fromEntries(Object.keys(TaskStatus).map(s => [s, 0]));
+        const tasksStatusSummary = Object.fromEntries(Object.values(TaskStatus).map((s: TaskStatus) => [s, 0]));
         previousTasks.forEach(t => {
             tasksStatusSummary[t.status] += 1;
         });
 
-        const result = {
+        const report = {
             workflowId: task.workflow.workflowId,
             tasks: previousTasks.map(this.digestTask.bind(this, outputs)),
             tasksStatusSummary,
+            finalReport: JSON.stringify(outputs),
         };
 
-        return result;
+        console.log({ report });
+
+        return report;
     }
 
     /**
      * The report job is ready when all the previous tasks have finished (regardless of successfully or with errors).
      */
     override nextStatus(task: Task): TaskStatus | undefined {
-        if (task.status === TaskStatus.Queued && this.getJobDependencies(task).every(t => t.isFinished())) {
+        if (task.status === TaskStatus.Queued && this.getDependencies(task).every(t => t.isFinished())) {
             return TaskStatus.Ready;
         }
         return undefined;
@@ -44,7 +47,7 @@ export class ReportGenerationJob extends DefaultJob {
     /**
      * The report job implicitly depends on every task defined before.
      */
-    override getJobDependencies(task: Task): Task[] {
+    override getDependencies(task: Task): Task[] {
         const ownStepNumber = task.stepNumber;
         const previousTasks = task.workflow.tasks.filter(t => t.stepNumber < ownStepNumber);
         return previousTasks;

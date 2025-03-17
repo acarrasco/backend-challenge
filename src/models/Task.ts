@@ -31,11 +31,26 @@ export class Task {
     @ManyToOne(() => Workflow, workflow => workflow.tasks)
     workflow!: Workflow;
 
+    @Column('json', { array: true, default: '[]' })
+    dependsOn!: number[];
+
     isFinished(): boolean {
         return (
             this.status === TaskStatus.Completed ||
             this.status === TaskStatus.Failed ||
-            this.status == TaskStatus.Aborted
+            this.status === TaskStatus.Aborted
+        );
+    }
+
+    isError(): boolean {
+        return this.status === TaskStatus.Failed || this.status === TaskStatus.Aborted;
+    }
+
+    isPending(): boolean {
+        return (
+            this.status === TaskStatus.Queued ||
+            this.status === TaskStatus.Ready ||
+            this.status === TaskStatus.InProgress
         );
     }
 }
