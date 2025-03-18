@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { Workflow } from '../models/Workflow';
 import { Task } from '../models/Task';
 import { updateQueuedTasksStatus, TaskStatus } from '../workers/taskRunner';
+import { getJobForTaskType } from '../jobs/JobFactory';
 
 export enum WorkflowStatus {
     Initial = 'initial',
@@ -58,7 +59,7 @@ export class WorkflowFactory {
         });
 
         savedWorkflow.tasks = tasks;
-        updateQueuedTasksStatus(savedWorkflow);
+        updateQueuedTasksStatus(savedWorkflow, (task: Task) => getJobForTaskType(task.taskType));
 
         await taskRepository.save(tasks);
 

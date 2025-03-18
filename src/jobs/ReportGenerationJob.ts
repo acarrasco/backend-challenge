@@ -1,36 +1,22 @@
-import { DefaultJob, Job } from './Job';
+import { DefaultJob, Job, JobInput } from './Job';
 import { Task } from '../models/Task';
-import { Repository, In } from 'typeorm';
-import { Result } from '../models/Result';
 import { TaskStatus } from '../workers/taskRunner';
-
-export interface ReportGenerationJobDependencies {
-    getResults(resultIds: string[]): Promise<Result[]>;
-}
+import { Workflow } from '../models/Workflow';
 
 export class ReportGenerationJob extends DefaultJob {
-    constructor(protected deps: ReportGenerationJobDependencies) {
-        super();
-    }
-
-    async run(task: Task): Promise<object> {
+    async run(task: Task, ...inputs: JobInput[]): Promise<object> {
         console.log(`Generating report for task ${task.taskId}...`);
 
-        const previousTasks = this.getDependencies(task);
-        const resultIds = previousTasks.map(t => t.resultId).filter(x => x !== undefined);
-        const results = await this.deps.getResults(resultIds);
-        const outputs = Object.fromEntries(results.map(r => [r.resultId, r.data]));
-
         const tasksStatusSummary = Object.fromEntries(Object.values(TaskStatus).map((s: TaskStatus) => [s, 0]));
-        previousTasks.forEach(t => {
-            tasksStatusSummary[t.status] += 1;
+        inputs.forEach(input => {
+            tasksStatusSummary[input.task.status] += 1;
         });
 
         const report = {
             workflowId: task.workflow.workflowId,
-            tasks: previousTasks.map(this.digestTask.bind(this, outputs)),
+            tasks: inputs.map(ReportGenerationJob.digestJob),
             tasksStatusSummary,
-            finalReport: JSON.stringify(outputs),
+            finalReport: inputs.map(ReportGenerationJob.finalReportSummaryItem).join('\n'),
         };
 
         console.log({ report });
@@ -41,8 +27,8 @@ export class ReportGenerationJob extends DefaultJob {
     /**
      * The report job is ready when all the previous tasks have finished (regardless of successfully or with errors).
      */
-    override nextStatus(task: Task): TaskStatus | undefined {
-        if (task.status === TaskStatus.Queued && this.getDependencies(task).every(t => t.isFinished())) {
+    override nextStatus(task: Task, workflow: Workflow): TaskStatus | undefined {
+        if (task.status === TaskStatus.Queued && this.getDependencies(task, workflow).every(t => t.isFinished())) {
             return TaskStatus.Ready;
         }
         return undefined;
@@ -51,20 +37,23 @@ export class ReportGenerationJob extends DefaultJob {
     /**
      * The report job implicitly depends on every task defined before.
      */
-    override getDependencies(task: Task): Task[] {
+    override getDependencies(task: Task, workflow: Workflow): Task[] {
         const ownStepNumber = task.stepNumber;
-        const previousTasks = task.workflow.tasks.filter(t => t.stepNumber < ownStepNumber);
+        const previousTasks = workflow.tasks.filter(t => t.stepNumber < ownStepNumber);
         return previousTasks;
     }
 
-    digestTask(outputs: Record<string, unknown>, task: Task) {
-        const output = task.resultId && outputs[task.resultId];
-
+    static digestJob(jobInput: JobInput) {
         return {
-            taskId: task.taskId,
-            type: task.taskType,
-            status: task.status,
-            output,
+            taskId: jobInput.task.taskId,
+            stepNumber: jobInput.task.stepNumber,
+            type: jobInput.task.taskType,
+            status: jobInput.task.status,
+            output: jobInput.result?.data || {},
         };
+    }
+
+    static finalReportSummaryItem(i: JobInput): string {
+        return `#${i.task.stepNumber}.${i.task.taskType}[${i.task.status}]=${i.result?.data || '{}'}`;
     }
 }

@@ -1,10 +1,8 @@
-import { In, Repository } from 'typeorm';
 import { Task } from '../models/Task';
-import { getJobForTaskType } from '../jobs/JobFactory';
 import { WorkflowStatus } from '../workflows/WorkflowFactory';
 import { Workflow } from '../models/Workflow';
 import { Result } from '../models/Result';
-import { Job } from '../jobs/Job';
+import { Job, JobInput } from '../jobs/Job';
 
 export enum TaskStatus {
     /**
@@ -42,14 +40,16 @@ export enum TaskStatus {
  * @param remaining Tasks whose status have not changed (yet)
  * @returns The tasks that have their status updated.
  */
-function getChangedTasks(remaining: Task[]): Task[] {
+function getChangedTasks(remaining: Task[], workflow: Workflow, getJobForTask: (task: Task) => Job): Task[] {
     const changed: Task[] = [];
     const unchanged: Task[] = [];
 
     for (const task of remaining) {
-        const nextStatus = getJobForTaskType(task.taskType).nextStatus(task);
+        const nextStatus = getJobForTask(task).nextStatus(task, workflow);
         if (nextStatus) {
-            console.log(`Task ${task.taskId} of type ${task.taskType} is ${nextStatus}`);
+            console.log(
+                `Workflow ${workflow.workflowId} Step ${task.stepNumber} of type ${task.taskType} is ${nextStatus}`,
+            );
             task.status = nextStatus;
             changed.push(task);
         } else {
@@ -58,7 +58,7 @@ function getChangedTasks(remaining: Task[]): Task[] {
     }
 
     if (changed.length) {
-        changed.push(...getChangedTasks(unchanged));
+        changed.push(...getChangedTasks(unchanged, workflow, getJobForTask));
     }
 
     return changed;
@@ -70,13 +70,12 @@ function getChangedTasks(remaining: Task[]): Task[] {
  * @param workflow The workflow its tasks statuses should be updated.
  * @returns The tasks that have an updated status.
  */
-export function updateQueuedTasksStatus(workflow: Workflow): Task[] {
-    workflow.linkTasks();
+export function updateQueuedTasksStatus(workflow: Workflow, getJobForTask: (task: Task) => Job): Task[] {
     const queuedTasks = workflow.tasks.filter(t => t.status === TaskStatus.Queued);
-    return getChangedTasks(queuedTasks);
+    return getChangedTasks(queuedTasks, workflow, getJobForTask);
 }
 
-async function getDataAndStatus(task: Task, job: Job, ...inputs: Result[]): Promise<[TaskStatus, string]> {
+async function getDataAndStatus(task: Task, job: Job, ...inputs: JobInput[]): Promise<[TaskStatus, string]> {
     try {
         const result = await job.run(task, ...inputs);
         return [TaskStatus.Completed, JSON.stringify(result || {})];
@@ -90,7 +89,7 @@ export interface TaskRunnerDependencies {
     getResults(resultIds: string[]): Promise<Result[]>;
     saveResult(result: Result): Promise<Result>;
     getJobForTask(task: Task): Job;
-    getWorkflow(task: Task): Promise<Workflow>;
+    getWorkflow(workflowId: string): Promise<Workflow>;
     saveWorkflow(workflow: Workflow): Promise<Workflow>;
 }
 
@@ -102,16 +101,18 @@ export class TaskRunner {
      * @param task - The task entity that determines which job to run.
      * @throws If the job fails, it rethrows the error.
      */
-    async run(task: Task): Promise<void> {
+    async run(task: Task, workflow: Workflow): Promise<void> {
         task.status = TaskStatus.InProgress;
         task.progress = 'starting job...';
         await this.deps.saveTasks(task);
         const job = this.deps.getJobForTask(task);
 
         console.log(`Starting job ${task.taskType} for task ${task.taskId}...`);
-        const dependencies = job.getDependencies(task);
+        const dependencies = job.getDependencies(task, workflow);
         const inputResultIds = dependencies.map(t => t.resultId).filter(x => x !== undefined);
-        const inputs = await this.deps.getResults(inputResultIds);
+        const results = await this.deps.getResults(inputResultIds);
+        const resultsByTaskId = Object.fromEntries(results.map(r => [r.taskId, r]));
+        const inputs = dependencies.map(t => ({ task: t, result: resultsByTaskId[t.taskId] }));
 
         const [status, data] = await getDataAndStatus(task, job, ...inputs);
         const result = new Result();
@@ -123,22 +124,22 @@ export class TaskRunner {
         task.progress = null;
         await this.deps.saveTasks(task);
 
-        const currentWorkflow = await this.deps.getWorkflow(task);
+        const updatedWorkflow = await this.deps.getWorkflow(workflow.workflowId);
 
-        const allCompleted = currentWorkflow.tasks.every(t => t.status === TaskStatus.Completed);
-        const anyFailed = currentWorkflow.tasks.some(t => t.status === TaskStatus.Failed);
+        const allCompleted = updatedWorkflow.tasks.every(t => t.status === TaskStatus.Completed);
+        const anyFailed = updatedWorkflow.tasks.some(t => t.status === TaskStatus.Failed);
 
         if (anyFailed) {
-            currentWorkflow.status = WorkflowStatus.Failed;
+            updatedWorkflow.status = WorkflowStatus.Failed;
         } else if (allCompleted) {
-            currentWorkflow.status = WorkflowStatus.Completed;
+            updatedWorkflow.status = WorkflowStatus.Completed;
         } else {
-            currentWorkflow.status = WorkflowStatus.InProgress;
+            updatedWorkflow.status = WorkflowStatus.InProgress;
         }
 
-        const changedStatusTasks = updateQueuedTasksStatus(currentWorkflow);
+        const changedStatusTasks = updateQueuedTasksStatus(updatedWorkflow, this.deps.getJobForTask);
 
         await this.deps.saveTasks(...changedStatusTasks);
-        await this.deps.saveWorkflow(currentWorkflow);
+        await this.deps.saveWorkflow(updatedWorkflow);
     }
 }

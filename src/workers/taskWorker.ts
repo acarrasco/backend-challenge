@@ -19,12 +19,11 @@ export async function taskWorker() {
         getResults(resultIds) {
             return resultRepository.findBy({ resultId: In(resultIds) });
         },
-        async getWorkflow(task) {
+        async getWorkflow(workflowId) {
             const workflow = await workflowRepository.findOneOrFail({
-                where: { workflowId: task.workflow.workflowId },
+                where: { workflowId },
                 relations: ['tasks'],
             });
-            workflow?.linkTasks();
             return workflow;
         },
         saveResult(result) {
@@ -46,8 +45,7 @@ export async function taskWorker() {
 
         if (task) {
             try {
-                task.workflow.linkTasks();
-                await taskRunner.run(task);
+                await taskRunner.run(task, task.workflow);
             } catch (error) {
                 console.error('Task execution failed. Task status has already been updated by TaskRunner.');
                 console.error(error);
