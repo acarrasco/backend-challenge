@@ -4,6 +4,7 @@ import { getJobForTaskType } from '../jobs/JobFactory';
 import { WorkflowStatus } from '../workflows/WorkflowFactory';
 import { Workflow } from '../models/Workflow';
 import { Result } from '../models/Result';
+import { Job } from '../jobs/Job';
 
 export enum TaskStatus {
     /**
@@ -75,8 +76,26 @@ export function updateQueuedTasksStatus(workflow: Workflow): Task[] {
     return getChangedTasks(queuedTasks);
 }
 
+async function getDataAndStatus(task: Task, job: Job, ...inputs: Result[]): Promise<[TaskStatus, string]> {
+    try {
+        const result = await job.run(task, ...inputs);
+        return [TaskStatus.Completed, JSON.stringify(result || {})];
+    } catch (error: any) {
+        return [TaskStatus.Failed, error.toString()];
+    }
+}
+
+export interface TaskRunnerDependencies {
+    saveTasks(...task: Task[]): Promise<Task[]>;
+    getResults(resultIds: string[]): Promise<Result[]>;
+    saveResult(result: Result): Promise<Result>;
+    getJobForTask(task: Task): Job;
+    getWorkflow(task: Task): Promise<Workflow>;
+    saveWorkflow(workflow: Workflow): Promise<Workflow>;
+}
+
 export class TaskRunner {
-    constructor(private taskRepository: Repository<Task>) {}
+    constructor(private deps: TaskRunnerDependencies) {}
 
     /**
      * Runs the appropriate job based on the task's type, managing the task's status.
@@ -86,54 +105,40 @@ export class TaskRunner {
     async run(task: Task): Promise<void> {
         task.status = TaskStatus.InProgress;
         task.progress = 'starting job...';
-        await this.taskRepository.save(task);
-        const job = getJobForTaskType(task.taskType);
+        await this.deps.saveTasks(task);
+        const job = this.deps.getJobForTask(task);
 
-        try {
-            console.log(`Starting job ${task.taskType} for task ${task.taskId}...`);
-            const resultRepository = this.taskRepository.manager.getRepository(Result);
-            const dependencies = job.getDependencies(task);
-            const inputs = await resultRepository.findBy({ resultId: In(dependencies.map(t => t.resultId)) });
-            const taskResult = await job.run(task, ...inputs);
-            console.log(`Job ${task.taskType} for task ${task.taskId} completed successfully.`);
-            const result = new Result();
-            result.taskId = task.taskId!;
-            result.data = JSON.stringify(taskResult || {});
-            await resultRepository.save(result);
-            task.resultId = result.resultId!;
-            task.status = TaskStatus.Completed;
-            task.progress = null;
-            await this.taskRepository.save(task);
-        } catch (error: any) {
-            console.error(`Error running job ${task.taskType} for task ${task.taskId}:`, error);
+        console.log(`Starting job ${task.taskType} for task ${task.taskId}...`);
+        const dependencies = job.getDependencies(task);
+        const inputResultIds = dependencies.map(t => t.resultId).filter(x => x !== undefined);
+        const inputs = await this.deps.getResults(inputResultIds);
 
-            task.status = TaskStatus.Failed;
-            task.progress = null;
-            await this.taskRepository.save(task);
+        const [status, data] = await getDataAndStatus(task, job, ...inputs);
+        const result = new Result();
+        result.taskId = task.taskId!;
+        result.data = data;
+        await this.deps.saveResult(result);
+        task.resultId = result.resultId;
+        task.status = status;
+        task.progress = null;
+        await this.deps.saveTasks(task);
+
+        const currentWorkflow = await this.deps.getWorkflow(task);
+
+        const allCompleted = currentWorkflow.tasks.every(t => t.status === TaskStatus.Completed);
+        const anyFailed = currentWorkflow.tasks.some(t => t.status === TaskStatus.Failed);
+
+        if (anyFailed) {
+            currentWorkflow.status = WorkflowStatus.Failed;
+        } else if (allCompleted) {
+            currentWorkflow.status = WorkflowStatus.Completed;
+        } else {
+            currentWorkflow.status = WorkflowStatus.InProgress;
         }
 
-        const workflowRepository = this.taskRepository.manager.getRepository(Workflow);
-        const currentWorkflow = await workflowRepository.findOne({
-            where: { workflowId: task.workflow.workflowId },
-            relations: ['tasks'],
-        });
+        const changedStatusTasks = updateQueuedTasksStatus(currentWorkflow);
 
-        if (currentWorkflow) {
-            const allCompleted = currentWorkflow.tasks.every(t => t.status === TaskStatus.Completed);
-            const anyFailed = currentWorkflow.tasks.some(t => t.status === TaskStatus.Failed);
-
-            if (anyFailed) {
-                currentWorkflow.status = WorkflowStatus.Failed;
-            } else if (allCompleted) {
-                currentWorkflow.status = WorkflowStatus.Completed;
-            } else {
-                currentWorkflow.status = WorkflowStatus.InProgress;
-            }
-
-            const changedStatusTasks = updateQueuedTasksStatus(currentWorkflow);
-
-            await this.taskRepository.save(changedStatusTasks);
-            await workflowRepository.save(currentWorkflow);
-        }
+        await this.deps.saveTasks(...changedStatusTasks);
+        await this.deps.saveWorkflow(currentWorkflow);
     }
 }

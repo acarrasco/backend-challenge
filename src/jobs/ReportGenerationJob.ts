@@ -4,8 +4,12 @@ import { Repository, In } from 'typeorm';
 import { Result } from '../models/Result';
 import { TaskStatus } from '../workers/taskRunner';
 
+export interface ReportGenerationJobDependencies {
+    getResults(resultIds: string[]): Promise<Result[]>;
+}
+
 export class ReportGenerationJob extends DefaultJob {
-    constructor(protected resultRepository: Repository<Result>) {
+    constructor(protected deps: ReportGenerationJobDependencies) {
         super();
     }
 
@@ -13,8 +17,8 @@ export class ReportGenerationJob extends DefaultJob {
         console.log(`Generating report for task ${task.taskId}...`);
 
         const previousTasks = this.getDependencies(task);
-        const resultIds = previousTasks.map(t => t.resultId);
-        const results = await this.resultRepository.findBy({ resultId: In(resultIds) });
+        const resultIds = previousTasks.map(t => t.resultId).filter(x => x !== undefined);
+        const results = await this.deps.getResults(resultIds);
         const outputs = Object.fromEntries(results.map(r => [r.resultId, r.data]));
 
         const tasksStatusSummary = Object.fromEntries(Object.values(TaskStatus).map((s: TaskStatus) => [s, 0]));

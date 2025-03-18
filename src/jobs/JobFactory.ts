@@ -8,12 +8,19 @@ import { Result } from '../models/Result';
 import { AlwaysFailJob } from './AlwaysFailJob';
 import { RandomNumberJob } from './RandomNumberJob';
 import { SumJob } from './SumJob';
+import { In } from 'typeorm';
 
 const jobMap: Record<string, () => Job> = {
     analysis: () => new DataAnalysisJob(),
     notification: () => new EmailNotificationJob(),
     area: () => new PolygonAreaJob(),
-    report: () => new ReportGenerationJob(AppDataSource.getRepository(Result)),
+    report: () =>
+        new ReportGenerationJob({
+            async getResults(resultIds: string[]) {
+                const repository = AppDataSource.getRepository(Result);
+                return await repository.findBy({ resultId: In(resultIds) });
+            },
+        }),
     fail: () => new AlwaysFailJob(),
     random: () => new RandomNumberJob(),
     sum: () => new SumJob(),

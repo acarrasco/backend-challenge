@@ -1,10 +1,42 @@
+import { In } from 'typeorm';
 import { AppDataSource } from '../data-source';
+import { Job } from '../jobs/Job';
+import { getJobForTaskType } from '../jobs/JobFactory';
 import { Task } from '../models/Task';
 import { TaskRunner, TaskStatus } from './taskRunner';
+import { Result } from '../models/Result';
+import { Workflow } from '../models/Workflow';
 
 export async function taskWorker() {
     const taskRepository = AppDataSource.getRepository(Task);
-    const taskRunner = new TaskRunner(taskRepository);
+    const resultRepository = AppDataSource.getRepository(Result);
+    const workflowRepository = AppDataSource.getRepository(Workflow);
+
+    const taskRunner = new TaskRunner({
+        getJobForTask(task: Task): Job {
+            return getJobForTaskType(task.taskType);
+        },
+        getResults(resultIds) {
+            return resultRepository.findBy({ resultId: In(resultIds) });
+        },
+        async getWorkflow(task) {
+            const workflow = await workflowRepository.findOneOrFail({
+                where: { workflowId: task.workflow.workflowId },
+                relations: ['tasks'],
+            });
+            workflow?.linkTasks();
+            return workflow;
+        },
+        saveResult(result) {
+            return resultRepository.save(result);
+        },
+        saveTasks(...task) {
+            return taskRepository.save(task);
+        },
+        saveWorkflow(workflow) {
+            return workflowRepository.save(workflow);
+        },
+    });
 
     while (true) {
         const task = await taskRepository.findOne({
@@ -23,6 +55,6 @@ export async function taskWorker() {
         }
 
         // Wait before checking for the next task again
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
 }
