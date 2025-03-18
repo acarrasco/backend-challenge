@@ -7,10 +7,7 @@ export class ReportGenerationJob extends DefaultJob {
     async run(task: Task, ...inputs: JobInput[]): Promise<object> {
         console.log(`Generating report for task ${task.taskId}...`);
 
-        const tasksStatusSummary = Object.fromEntries(Object.values(TaskStatus).map((s: TaskStatus) => [s, 0]));
-        inputs.forEach(input => {
-            tasksStatusSummary[input.task.status] += 1;
-        });
+        const tasksStatusSummary = ReportGenerationJob.getTasksSummary(inputs.map(i => i.task));
 
         const report = {
             workflowId: task.workflow.workflowId,
@@ -41,6 +38,14 @@ export class ReportGenerationJob extends DefaultJob {
         const ownStepNumber = task.stepNumber;
         const previousTasks = workflow.tasks.filter(t => t.stepNumber < ownStepNumber);
         return previousTasks;
+    }
+
+    static getTasksSummary(tasks: Task[]) {
+        const tasksStatusSummary = Object.fromEntries(Object.values(TaskStatus).map((s: TaskStatus) => [s, 0]));
+        tasks.forEach(task => {
+            tasksStatusSummary[task.status] += 1;
+        });
+        return tasksStatusSummary;
     }
 
     static digestJob(jobInput: JobInput) {

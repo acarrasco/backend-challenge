@@ -6,6 +6,7 @@ import { ReportGenerationJob } from './ReportGenerationJob';
 import { AlwaysFailJob } from './AlwaysFailJob';
 import { RandomNumberJob } from './RandomNumberJob';
 import { SumJob } from './SumJob';
+import { LongJob } from './LongJob';
 
 const jobMap: Record<string, () => Job> = {
     analysis: () => new DataAnalysisJob(),
@@ -15,6 +16,7 @@ const jobMap: Record<string, () => Job> = {
     fail: () => new AlwaysFailJob(),
     random: () => new RandomNumberJob(),
     sum: () => new SumJob(),
+    long: () => new LongJob(),
 };
 
 export function getJobForTaskType(taskType: string): Job {

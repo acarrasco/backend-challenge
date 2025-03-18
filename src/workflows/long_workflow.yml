@@ -1,0 +1,15 @@
+name: 'long_workflow'
+steps:
+    - taskType: 'random'
+      stepNumber: 1
+    - taskType: 'random'
+      stepNumber: 2
+      dependsOn: [6]
+    - taskType: 'sum'
+      stepNumber: 3
+      dependsOn: [1, 2]
+    - taskType: 'notification'
+      stepNumber: 5
+      dependsOn: [3]
+    - taskType: 'long'
+      stepNumber: 6
