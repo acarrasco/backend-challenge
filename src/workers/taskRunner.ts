@@ -3,6 +3,7 @@ import { WorkflowStatus } from '../workflows/WorkflowFactory';
 import { Workflow } from '../models/Workflow';
 import { Result } from '../models/Result';
 import { Job, JobInput } from '../jobs/Job';
+import { ReportGenerationJob } from '../jobs/ReportGenerationJob';
 
 export enum TaskStatus {
     /**
@@ -109,10 +110,7 @@ export class TaskRunner {
 
         console.log(`Starting job ${task.taskType} for task ${task.taskId}...`);
         const dependencies = job.getDependencies(task, workflow);
-        const inputResultIds = dependencies.map(t => t.resultId).filter(x => x !== undefined);
-        const results = await this.deps.getResults(inputResultIds);
-        const resultsByTaskId = Object.fromEntries(results.map(r => [r.taskId, r]));
-        const inputs = dependencies.map(t => ({ task: t, result: resultsByTaskId[t.taskId] }));
+        const inputs = await this.getJobInputs(dependencies);
 
         const [status, data] = await getDataAndStatus(task, job, ...inputs);
         const result = new Result();
@@ -133,6 +131,8 @@ export class TaskRunner {
             updatedWorkflow.status = WorkflowStatus.Failed;
         } else if (allCompleted) {
             updatedWorkflow.status = WorkflowStatus.Completed;
+            const allInputs = await this.getJobInputs(updatedWorkflow.tasks);
+            updatedWorkflow.finalResult = ReportGenerationJob.makeFinalReport(allInputs);
         } else {
             updatedWorkflow.status = WorkflowStatus.InProgress;
         }
@@ -141,5 +141,13 @@ export class TaskRunner {
 
         await this.deps.saveTasks(...changedStatusTasks);
         await this.deps.saveWorkflow(updatedWorkflow);
+    }
+
+    async getJobInputs(tasks: Task[]): Promise<JobInput[]> {
+        const inputResultIds = tasks.map(t => t.resultId).filter(x => x !== undefined);
+        const results = await this.deps.getResults(inputResultIds);
+        const resultsByTaskId = Object.fromEntries(results.map(r => [r.taskId, r]));
+        const jobInputs = tasks.map(t => ({ task: t, result: resultsByTaskId[t.taskId] }));
+        return jobInputs;
     }
 }

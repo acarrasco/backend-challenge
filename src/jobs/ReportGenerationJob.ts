@@ -16,7 +16,7 @@ export class ReportGenerationJob extends DefaultJob {
             workflowId: task.workflow.workflowId,
             tasks: inputs.map(ReportGenerationJob.digestJob),
             tasksStatusSummary,
-            finalReport: inputs.map(ReportGenerationJob.finalReportSummaryItem).join('\n'),
+            finalReport: ReportGenerationJob.makeFinalReport(inputs),
         };
 
         console.log({ report });
@@ -55,5 +55,9 @@ export class ReportGenerationJob extends DefaultJob {
 
     static finalReportSummaryItem(i: JobInput): string {
         return `#${i.task.stepNumber}.${i.task.taskType}[${i.task.status}]=${i.result?.data || '{}'}`;
+    }
+
+    static makeFinalReport(inputs: JobInput[]) {
+        return inputs.map(ReportGenerationJob.finalReportSummaryItem).join('\n');
     }
 }
